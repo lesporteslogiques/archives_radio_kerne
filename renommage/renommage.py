@@ -23,6 +23,9 @@ import os
 import sys
 import re        # expressions régulières
 import magic     # identification des types mime
+import shutil    # copie de fichiers : https://docs.python.org/3/library/shutil.html )
+import hashlib   # vérification de l'intégrité des fichiers copiés
+import logging   # enregistrement des erreurs
 
 def lister_fichiers_chemins(dossier):
     """Retourne la liste récursive des fichiers avec leur chemin complet."""
@@ -33,6 +36,7 @@ def lister_fichiers_chemins(dossier):
             fichiers.append(chemin)
         elif os.path.isdir(chemin):
             fichiers.extend(lister_fichiers_chemins(chemin))
+    fichiers.sort()
     return fichiers
 
 def lister_sous_dossiers_chemins(dossier) :
@@ -49,10 +53,31 @@ def lister_sous_dossiers_chemins(dossier) :
     # Afficher la liste des sous-dossiers
     return sous_dossiers
 
+def calculer_hash_fichier(fichier):
+
+    sha256 = hashlib.sha256()  # Créer un objet de hachage SHA-256
+
+    # Lire le fichier par petits morceaux pour éviter de charger le fichier entier en mémoire
+    with open(fichier, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b''):
+            sha256.update(chunk) # Mettre à jour l'objet de hachage avec le morceau de données
+
+    hash_resultat = sha256.hexdigest() # Récupérer la valeur de hachage calculée
+
+    return hash_resultat
+
+
+
 RAC = './RAC/BRUT'   # Dossier racine des fichiers originaux (RAC)
 REN = './REN'        # Dossier racine des fichiers renommés (REN)
 ATRAITER = []        # Liste de tous les dossiers à traiter
 mode_traitement = '' # Mode 'exécution du script (dossier ou liste)
+
+mime_extension = {
+    "audio/x-aiff": "aiff",
+    "audio/x-wav": "wav",
+    "audio/mpeg": "mp3"       # /!\ pas sûr que le type soit suffisant...
+}
 
 
 # ***************************************************************************
@@ -97,6 +122,7 @@ FICMIME = ''  # fichier en cours : type mime
 FICEXT = ''   # fichier en cours : extension
 FICREN = ''   # fichier en cours : nom après renommage
 IDX = 0       # index numérique du premier fichier
+CORR = ''     # fichier des correspondances
 
 # Itérer sur les dossiers ***************************************************
 
@@ -105,6 +131,7 @@ for SUPPORT in ATRAITER :
     vraiment_a_traiter = True
     DOSSRAC = RAC + '/' + SUPPORT
     DOSSREN = REN + '/' + SUPPORT
+
     print("Dossier en cours de traitement (DOSSRAC) :", DOSSRAC)
 
     # Le nom est il correct ("AK" suivi de 4 chiffres)
@@ -129,6 +156,9 @@ for SUPPORT in ATRAITER :
             print("le dossier a déjà été traité -> fin du traitement")
         else :
             print("vérification manuelle nécessaire, le dossier existe dans REN");
+    else :          # sinon il faut le créer
+        os.mkdir(DOSSREN)
+
 
     # Y a t'il des sous-dossiers
     sous_dossiers = lister_sous_dossiers_chemins(DOSSRAC)
@@ -143,8 +173,19 @@ for SUPPORT in ATRAITER :
         sys.exit()
     else :
 
+        # Démarrer le logging
+        logging.basicConfig(filename=DOSSREN + "/LOG", level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+        # Créer le fichier des correspondances
+        CORR = DOSSREN + "/" + SUPPORT + "_correspondances.csv"
+        with open(CORR, 'w') as f:
+            pass
+
+
         LFIC = lister_fichiers_chemins(DOSSRAC)
         IDX = 0
+
+        problemes = False
 
         # Traiter les fichiers les uns après les autres
         for FIC in LFIC :
@@ -159,14 +200,65 @@ for SUPPORT in ATRAITER :
             FICMIME = magic.from_file(FIC, mime=True)
             nom_fichier, extension = os.path.splitext(FIC)
             if extension != '' :
-                FICEXT = extension
+                FICEXT = extension.lstrip('.').lower()
+            else :
+                FICEXT = mime_extension(FICMIME)
 
             print("Fichier en cours :" + FIC)
             print("Type : "            + FICTYPE)
             print("Type mime : "       + FICMIME)
             print("Extension : "       + FICEXT)
 
-            FICID  = "{0:05d}".format(IDX)
-            FICREN = SUPPORT + "_" + FICID + "." + FICEXT.lstrip('.').lower()
+            FICID   = "{0:05d}".format(IDX)
+            FICREN  = SUPPORT + "_" + FICID + "." + FICEXT
+            FICDEST = DOSSREN + "/" + FICREN
+            logging.info(FIC + "  -->  " + FICREN)
 
             print("Une fois renommé :" + FICREN)
+
+
+            # Construire un nom de fichier sans la première partie du chemin
+            if FIC.startswith(RAC):
+                chfic = FIC[len(RAC+"/"):]
+            else:
+                chfic = FIC
+
+            # Ajouter les infos sur ce fichier dans le fichier de correspondances
+            with open(CORR, 'a') as f:
+                contenu = FICREN + ";" + chfic + ";" + FICMIME + ";" + FICTYPE + ";" + FICEXT + "\n"
+                f.write(contenu)
+
+            copier_ce_fichier = True # TODO, nuancer !
+
+            if copier_ce_fichier :
+
+                shutil.copy2(FIC, FICDEST)   # copier avec une fonction python
+
+                # Vérifier l'intégrité
+                try:
+                    hash_source = calculer_hash_fichier(FIC)
+                    hash_destination = calculer_hash_fichier(FICDEST)
+
+                    if hash_source == hash_destination :
+                        print("HASH : Le fichier a été copié avec succès.")
+                        logging.info("HASH : Le fichier a été copié avec succès.")
+                    else :
+                        # TODO !!!
+                        problemes = True
+                        print("HASH : Une erreur s'est produite lors de la copie du fichier.")
+                        logging.error("HASH : Une erreur s'est produite lors de la copie du fichier.")
+                except FileNotFoundError:
+                    print("HASH : Le fichier source ou le fichier de destination n'existe pas.")
+                    logging.error("HASH : Le fichier source ou le fichier de destination n'existe pas.")
+
+            else :
+                logging.warning("Le fichier n'a pas été copié (son type ne fait pas partie de la liste)")
+                pass  # TODO quand on ne copie pas le fichier
+
+        # Vérifier et ajouter le fichier DONE
+        if not problemes :
+            print("OK OK OK tout s'est déroulé sans accrocs!")
+            with open(DOSSREN + "/DONE", 'w') as f:
+                pass
+        else :
+            print("AIE AIE AIE il y a eu des problemes (voir le log)")
