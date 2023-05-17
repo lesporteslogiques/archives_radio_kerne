@@ -9,13 +9,8 @@ Appeler le script par
   ou
   python3 renommage.py liste=liste.txt
 
-Dans cette version : les supports avec des sous-dossiers NE SONT PAS TRAITES
-
-
-VRAC VRAC VRAC
-
-        # Lister les fichiers du dossier
-        #LFIC = [fic for fic in os.listdir(DOSS) if os.path.isdir(os.path.join(DOSS, fic))]
+TODO
+  * Dans cette version : les supports avec des sous-dossiers NE SONT PAS TRAITES
 
 """
 
@@ -243,7 +238,6 @@ for SUPPORT in ATRAITER :
                         print("HASH : Le fichier a été copié avec succès.")
                         logging.info("HASH : Le fichier a été copié avec succès.")
                     else :
-                        # TODO !!!
                         problemes = True
                         print("HASH : Une erreur s'est produite lors de la copie du fichier.")
                         logging.error("HASH : Une erreur s'est produite lors de la copie du fichier.")
